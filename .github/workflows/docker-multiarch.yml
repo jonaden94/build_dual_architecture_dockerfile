@@ -28,9 +28,8 @@ jobs:
       - name: Compute safe platform tag
         shell: bash
         run: |
-          # turn "linux/amd64" -> "linux-amd64"
           SAFE_PLATFORM="${{ matrix.platform }}"
-          SAFE_PLATFORM="${SAFE_PLATFORM//\//-}"
+          SAFE_PLATFORM="${SAFE_PLATFORM//\//-}"   # linux/amd64 -> linux-amd64
           echo "SAFE_PLATFORM=${SAFE_PLATFORM}" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
@@ -40,7 +39,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build and push a per-arch image *by digest*
+      # Build and push a per-arch image *by digest* (NO TAGS HERE)
       - name: Build & push (by digest)
         id: build
         uses: docker/build-push-action@v6
@@ -48,8 +47,6 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
-          # IMPORTANT: tags must not contain "/"
-          tags: ${{ env.IMAGE }}:temp-${{ env.SAFE_PLATFORM }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
