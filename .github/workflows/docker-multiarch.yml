@@ -1,45 +1,100 @@
-name: Build & Push Docker (multi-arch)
+name: Build & Push Docker (native multi-arch)
 
 on:
   push:
     branches: [ "main" ]
-    tags:
-      - "v*"
+    tags: [ "v*" ]
   workflow_dispatch:
+
+env:
+  IMAGE: jonathanhenrich94/adv-stat-inf
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs_on: ubuntu-latest
+          - platform: linux/arm64
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Compute tags
-        id: meta
-        run: |
-          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/adv-stat-inf
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VER="${GITHUB_REF#refs/tags/v}"
-            echo "tags=${IMAGE}:${VER},${IMAGE}:latest" >> $GITHUB_OUTPUT
-          else
-            echo "tags=${IMAGE}:latest" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build and push multi-arch
+      # Build and push a per-arch image *by digest*
+      - name: Build & push (by digest)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: ${{ matrix.platform }}
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.IMAGE }}:temp-${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          echo "${{ steps.build.outputs.digest }}" > /tmp/digests/digest-${{ matrix.platform }}
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.platform }}
+          path: /tmp/digests/digest-${{ matrix.platform }}
+          if-no-files-found: error
+
+  merge:
+    name: Merge multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - name: Compute tags
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF#refs/tags/v}"
+            echo "TAGS=${{ env.IMAGE }}:${VER} ${{ env.IMAGE }}:latest" >> $GITHUB_OUTPUT
+          else
+            echo "TAGS=${{ env.IMAGE }}:latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and push manifest list
+        run: |
+          AMD=$(cat /tmp/digests/digest-linux_amd64 | tr -d '\n')
+          ARM=$(cat /tmp/digests/digest-linux_arm64 | tr -d '\n')
+
+          for TAG in ${{ steps.meta.outputs.TAGS }}; do
+            docker buildx imagetools create \
+              -t "$TAG" \
+              "${{ env.IMAGE }}@${AMD}" \
+              "${{ env.IMAGE }}@${ARM}"
+          done
