@@ -7,7 +7,7 @@
 
 # Start from the official Rocker Tidyverse base image with R version 4.3.3. It already includes R, RStudio Server, the tidyverse packages,
 # many basic R packages like MASS, and common system dependencies. For details see https://rocker-project.org/images/versioned/rstudio.html
-FROM rocker/tidyverse:4.3.3
+FROM rocker/rstudio:4.3.3
 
 
 #############################################################################
@@ -18,6 +18,8 @@ FROM rocker/tidyverse:4.3.3
 # # You could then install specific version like this (error prone though!): 
 # RUN R -e "remotes::install_version(<package_name>, version = <version_number>, repos = 'https://cloud.r-project.org')"
 
+# Install tidyverse
+RUN R -e "install.packages('tidyverse')"
 # Install statistical / modeling utilities
 RUN R -e "install.packages(c('MCMCpack', 'invgamma'))"
 # Install data handling and visualization stack
@@ -35,7 +37,7 @@ RUN R -e "tinytex::install_tinytex(force = TRUE); tinytex::tlmgr_path()" \
  && R -e "tinytex::tlmgr_install(c('collection-latexrecommended','collection-latexextra','collection-fontsrecommended','collection-fontsextra'))" \
  && R -e "tinytex::tlmgr_update()"
 
- 
+
 #############################################################################
 # Create latexmkclean wrapper with more desirable attributes
 #############################################################################
